@@ -1,0 +1,305 @@
+{
+  "name": "Kommo Reconciliation Nightly",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "Cron_Daily",
+      "name": "Cron 02:00 AR",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();\nreturn [{ json: { since, page: 1 } }];"
+      },
+      "id": "Init_Params",
+      "name": "Init Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{$env.KOMMO_SUBDOMAIN}}.kommo.com/api/v4/leads",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter[updated_at][from]",
+              "value": "={{$json.since}}"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "page",
+              "value": "={{$json.page}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.KOMMO_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
+        }
+      },
+      "id": "HTTP_Leads",
+      "name": "Fetch Leads (Placeholder Endpoint)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{$env.KOMMO_SUBDOMAIN}}.kommo.com/api/v4/tasks",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter[updated_at][from]",
+              "value": "={{$json.since}}"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "page",
+              "value": "={{$json.page}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.KOMMO_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
+        }
+      },
+      "id": "HTTP_Tasks",
+      "name": "Fetch Tasks (Placeholder Endpoint)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst leads = $items('Fetch Leads (Placeholder Endpoint)', 0, 0).json?._embedded?.leads || [];\nconst tasks = $items('Fetch Tasks (Placeholder Endpoint)', 0, 0).json?._embedded?.tasks || [];\n\nconst dateKey = new Date().toISOString().slice(0,10);\nconst leadsEventId = crypto.createHash('sha256').update(`reconcile.leads:${dateKey}:${leads.length}`).digest('hex');\nconst tasksEventId = crypto.createHash('sha256').update(`reconcile.tasks:${dateKey}:${tasks.length}`).digest('hex');\n\nreturn [{ json: { leads, tasks, leadsEventId, tasksEventId, since: $json.since } }];"
+      },
+      "id": "Normalize_Reconcile",
+      "name": "Normalize Reconcile Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO raw_events (source, event_type, event_id, lead_id, payload, received_at) VALUES ('reconcile','reconcile.leads',$1,NULL,$2::jsonb,NOW()) ON CONFLICT (source, event_id) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{[$json.leadsEventId, JSON.stringify({since: $json.since, count: $json.leads.length})]}}"
+        }
+      },
+      "id": "Insert_Raw_Leads",
+      "name": "Insert Raw Reconcile Leads",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO raw_events (source, event_type, event_id, lead_id, payload, received_at) VALUES ('reconcile','reconcile.tasks',$1,NULL,$2::jsonb,NOW()) ON CONFLICT (source, event_id) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{[$json.tasksEventId, JSON.stringify({since: $json.since, count: $json.tasks.length})]}}"
+        }
+      },
+      "id": "Insert_Raw_Tasks",
+      "name": "Insert Raw Reconcile Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        380
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE raw_events SET processed_at = NOW(), error = NULL WHERE source = 'reconcile' AND event_id IN ($1,$2);",
+        "options": {
+          "queryReplacement": "={{[$json.leadsEventId, $json.tasksEventId]}}"
+        }
+      },
+      "id": "Mark_Reconcile_Processed",
+      "name": "Mark Reconcile Processed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1420,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron 02:00 AR": {
+      "main": [
+        [
+          {
+            "node": "Init Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Params": {
+      "main": [
+        [
+          {
+            "node": "Fetch Leads (Placeholder Endpoint)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Tasks (Placeholder Endpoint)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Leads (Placeholder Endpoint)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Reconcile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Tasks (Placeholder Endpoint)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Reconcile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Reconcile Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Raw Reconcile Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert Raw Reconcile Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Raw Reconcile Leads": {
+      "main": [
+        [
+          {
+            "node": "Mark Reconcile Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Raw Reconcile Tasks": {
+      "main": [
+        [
+          {
+            "node": "Mark Reconcile Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Argentina/Buenos_Aires",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "1"
+}

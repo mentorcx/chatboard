@@ -1,0 +1,353 @@
+{
+  "name": "Kommo Webhook -> Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "webhooks/kommo",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "Webhook_Kommo",
+      "name": "Webhook Kommo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst body = $json.body ?? $json;\nconst headers = $json.headers ?? {};\nconst secret = $env.KOMMO_WEBHOOK_SECRET || '';\nconst incomingSig = (headers['x-kommo-signature'] || headers['x-signature'] || '').toString().replace(/^sha256=/i, '');\n\nconst rawBody = JSON.stringify(body);\nlet signatureValid = true;\nif (secret) {\n  const calculated = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');\n  signatureValid = incomingSig.length > 0 && crypto.timingSafeEqual(Buffer.from(calculated, 'hex'), Buffer.from(incomingSig, 'hex'));\n}\n\nconst lead = body.lead || {};\nconst task = body.task || {};\nconst actor = body.actor || {};\nconst eventType = body.event_type || (task.completed_at ? 'task.completed' : task.id ? 'task.updated' : lead.from_stage_id || lead.to_stage_id ? 'lead.stage_changed' : lead.created_at ? 'lead.created' : 'lead.updated');\nconst eventAt = body.event_time || task.updated_at || lead.updated_at || new Date().toISOString();\nconst leadId = Number(lead.id || task.lead_id || 0) || null;\nconst pipelineId = Number(lead.pipeline_id || 0) || null;\nconst fromStageId = Number(lead.from_stage_id || 0) || null;\nconst toStageId = Number(lead.to_stage_id || lead.stage_id || 0) || null;\nconst taskId = Number(task.id || 0) || null;\n\nconst stable = JSON.stringify({ eventType, eventAt, leadId, pipelineId, fromStageId, toStageId, taskId, status: lead.status || task.status || null });\nconst eventId = String(body.event_id || crypto.createHash('sha256').update(stable).digest('hex'));\n\nreturn [{\n  json: {\n    signatureValid,\n    rawBody,\n    body,\n    normalized: {\n      source: 'kommo',\n      event_type: eventType,\n      event_id: eventId,\n      lead_id: leadId,\n      event_at: new Date(eventAt).toISOString(),\n      pipeline_id: pipelineId,\n      from_stage_id: fromStageId,\n      to_stage_id: toStageId,\n      owner_id: Number(lead.owner_id || task.owner_id || 0) || null,\n      actor_type: actor.type || null,\n      actor_id: Number(actor.id || 0) || null,\n      status: lead.status || task.status || null,\n      due_at: task.due_at ? new Date(task.due_at).toISOString() : null,\n      completed_at: task.completed_at ? new Date(task.completed_at).toISOString() : null,\n      price: lead.price ?? null,\n      lost_reason_id: Number(lead.lost_reason_id || 0) || null,\n      tags: Array.isArray(lead.tags) ? lead.tags : [],\n      source: lead.source || lead.utm_source || null,\n      campaign: lead.campaign || lead.utm_campaign || null,\n      channel: lead.channel || null,\n      task_id: taskId,\n      lead_created_at: lead.created_at ? new Date(lead.created_at).toISOString() : null,\n      lead_updated_at: lead.updated_at ? new Date(lead.updated_at).toISOString() : null\n    }\n  }\n}];"
+      },
+      "id": "Normalize_Event",
+      "name": "Normalize Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.signatureValid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "If_Signature",
+      "name": "If Signature Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        740,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO raw_events (source, event_type, event_id, lead_id, payload, received_at)\nVALUES ('kommo', $1, $2, $3, $4::jsonb, NOW())\nON CONFLICT (source, event_id) DO NOTHING\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{[$json.normalized.event_type, $json.normalized.event_id, $json.normalized.lead_id, JSON.stringify({schema_valid: true, body: $json.body})]}}"
+        }
+      },
+      "id": "Insert_Raw",
+      "name": "Insert Raw Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        980,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.length}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "If_New_Event",
+      "name": "If New Event",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO leads (lead_id, created_at, updated_at, pipeline_id, stage_id, status, owner_id, source, campaign, channel, lost_reason_id, price, tags)\nVALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,'unknown'),COALESCE($9,'unknown'),COALESCE($10,'unknown'),$11,$12,$13::jsonb)\nON CONFLICT (lead_id) DO UPDATE SET\nupdated_at = GREATEST(leads.updated_at, EXCLUDED.updated_at),\npipeline_id = COALESCE(EXCLUDED.pipeline_id, leads.pipeline_id),\nstage_id = COALESCE(EXCLUDED.stage_id, leads.stage_id),\nstatus = COALESCE(EXCLUDED.status, leads.status),\nowner_id = COALESCE(EXCLUDED.owner_id, leads.owner_id),\nsource = COALESCE(EXCLUDED.source, leads.source),\ncampaign = COALESCE(EXCLUDED.campaign, leads.campaign),\nchannel = COALESCE(EXCLUDED.channel, leads.channel),\nlost_reason_id = COALESCE(EXCLUDED.lost_reason_id, leads.lost_reason_id),\nprice = COALESCE(EXCLUDED.price, leads.price),\ntags = COALESCE(NULLIF(EXCLUDED.tags, '[]'::jsonb), leads.tags);",
+        "options": {
+          "queryReplacement": "={{[$node['Normalize Event'].json.normalized.lead_id, $node['Normalize Event'].json.normalized.lead_created_at || $node['Normalize Event'].json.normalized.event_at, $node['Normalize Event'].json.normalized.lead_updated_at || $node['Normalize Event'].json.normalized.event_at, $node['Normalize Event'].json.normalized.pipeline_id, $node['Normalize Event'].json.normalized.to_stage_id, $node['Normalize Event'].json.normalized.status, $node['Normalize Event'].json.normalized.owner_id, $node['Normalize Event'].json.normalized.source, $node['Normalize Event'].json.normalized.campaign, $node['Normalize Event'].json.normalized.channel, $node['Normalize Event'].json.normalized.lost_reason_id, $node['Normalize Event'].json.normalized.price, JSON.stringify($node['Normalize Event'].json.normalized.tags || [])]}}"
+        }
+      },
+      "id": "Upsert_Lead",
+      "name": "Upsert Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1450,
+        80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO lead_stage_events (lead_id, pipeline_id, from_stage_id, to_stage_id, event_at, actor_type, actor_id)\nVALUES ($1,$2,$3,$4,$5,COALESCE($6,'system'),$7)\nON CONFLICT (lead_id, to_stage_id, event_at) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{[$node['Normalize Event'].json.normalized.lead_id, $node['Normalize Event'].json.normalized.pipeline_id, $node['Normalize Event'].json.normalized.from_stage_id, $node['Normalize Event'].json.normalized.to_stage_id, $node['Normalize Event'].json.normalized.event_at, $node['Normalize Event'].json.normalized.actor_type, $node['Normalize Event'].json.normalized.actor_id]}}"
+        }
+      },
+      "id": "Insert_Stage_Event",
+      "name": "Insert Stage Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1680,
+        80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tasks (task_id, lead_id, owner_id, task_type, created_at, due_at, completed_at, status)\nVALUES ($1,$2,$3,COALESCE($4,'generic'),$5,$6,$7,COALESCE($8,'open'))\nON CONFLICT (task_id) DO UPDATE SET\nlead_id = EXCLUDED.lead_id,\nowner_id = COALESCE(EXCLUDED.owner_id, tasks.owner_id),\ntask_type = COALESCE(EXCLUDED.task_type, tasks.task_type),\ndue_at = COALESCE(EXCLUDED.due_at, tasks.due_at),\ncompleted_at = COALESCE(EXCLUDED.completed_at, tasks.completed_at),\nstatus = COALESCE(EXCLUDED.status, tasks.status);",
+        "options": {
+          "queryReplacement": "={{[$node['Normalize Event'].json.normalized.task_id, $node['Normalize Event'].json.normalized.lead_id, $node['Normalize Event'].json.normalized.owner_id, $node['Normalize Event'].json.normalized.status, $node['Normalize Event'].json.normalized.event_at, $node['Normalize Event'].json.normalized.due_at || $node['Normalize Event'].json.normalized.event_at, $node['Normalize Event'].json.normalized.completed_at, $node['Normalize Event'].json.normalized.status]}}"
+        }
+      },
+      "id": "Upsert_Task",
+      "name": "Upsert Task",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1910,
+        80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE raw_events SET processed_at = NOW(), error = NULL WHERE source = 'kommo' AND event_id = $1;",
+        "options": {
+          "queryReplacement": "={{[$node['Normalize Event'].json.normalized.event_id]}}"
+        }
+      },
+      "id": "Mark_Processed",
+      "name": "Mark Raw Processed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2140,
+        80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_credential",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, eventId: $node['Normalize Event'].json.normalized.event_id } }}"
+      },
+      "id": "Respond_OK",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2370,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 200,
+        "responseBody": "={{ { ok: true, duplicated: true, eventId: $node['Normalize Event'].json.normalized.event_id } }}"
+      },
+      "id": "Respond_Duplicate",
+      "name": "Respond Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1450,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 401,
+        "responseBody": "={{ { ok: false, error: 'invalid_signature' } }}"
+      },
+      "id": "Respond_401",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        980,
+        360
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Kommo": {
+      "main": [
+        [
+          {
+            "node": "Normalize Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Event": {
+      "main": [
+        [
+          {
+            "node": "If Signature Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Signature Valid": {
+      "main": [
+        [
+          {
+            "node": "Insert Raw Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Raw Event": {
+      "main": [
+        [
+          {
+            "node": "If New Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Event": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead": {
+      "main": [
+        [
+          {
+            "node": "Insert Stage Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Stage Event": {
+      "main": [
+        [
+          {
+            "node": "Upsert Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Task": {
+      "main": [
+        [
+          {
+            "node": "Mark Raw Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Raw Processed": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "1"
+}

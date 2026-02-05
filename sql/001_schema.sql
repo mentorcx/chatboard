@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS leads (
   pipeline_id bigint NOT NULL REFERENCES pipelines(pipeline_id),
   stage_id bigint NOT NULL REFERENCES stages(stage_id),
   status text NOT NULL,
-  owner_id bigint REFERENCES users(user_id),
+  owner_id bigint NOT NULL REFERENCES users(user_id),
   source text NOT NULL DEFAULT 'unknown',
   campaign text NOT NULL DEFAULT 'unknown',
   channel text NOT NULL DEFAULT 'unknown',
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS lead_stage_events (
 CREATE TABLE IF NOT EXISTS tasks (
   task_id bigint PRIMARY KEY,
   lead_id bigint NOT NULL REFERENCES leads(lead_id),
-  owner_id bigint REFERENCES users(user_id),
+  owner_id bigint NOT NULL REFERENCES users(user_id),
   task_type text NOT NULL,
   created_at timestamptz NOT NULL,
   due_at timestamptz NOT NULL,
