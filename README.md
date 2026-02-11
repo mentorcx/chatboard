@@ -175,6 +175,116 @@ Filtros globales:
 - source/campaign
 - pipeline_id
 
+## 10) Guía detallada de puesta en marcha (paso a paso)
+
+### 10.1 Preparación de Supabase
+1. Crear proyecto Supabase.
+2. Ir a **SQL Editor**.
+3. Ejecutar `sql/001_schema.sql`.
+4. Ejecutar `sql/002_views.sql`.
+5. Confirmar que existan tablas (`raw_events`, `leads`, `lead_stage_events`, `tasks`, etc.) y views (`vw_*`).
+
+### 10.2 Preparación de n8n
+1. Copiar `.env.example` a `.env` y completar variables.
+2. Generar `N8N_ENCRYPTION_KEY` (mínimo 32 chars).
+3. Ejecutar `docker compose up -d`.
+4. Ingresar a `http://localhost:5678` y crear usuario/admin.
+
+### 10.3 Importación de workflows
+1. En n8n, ir a **Workflows → Import from File**.
+2. Importar:
+   - `n8n/workflows/kommo_webhook_workflow.json`
+   - `n8n/workflows/kommo_reconcile_workflow.json`
+3. Crear credencial **Postgres** con el `DATABASE_URL` de Supabase.
+4. Abrir cada workflow y asignar la credencial a los nodos Postgres.
+5. Guardar y **activar** ambos workflows.
+
+### 10.4 Configuración en Kommo
+1. En Kommo, crear webhook de tipo POST.
+2. URL: `http://<tu-host-n8n>:5678/webhook/webhooks/kommo`
+3. Si usás firma: configurar `KOMMO_WEBHOOK_SECRET` y enviar header `X-KOMMO-SIGNATURE`.
+
+### 10.5 Configuración en Metabase
+1. Ingresar a `http://localhost:3001`.
+2. Crear conexión a Postgres:
+   - Host: `<supabase-host>`
+   - Port: `5432`
+   - DB: `postgres`
+   - User/Password: credenciales Supabase
+   - SSL: enabled (`require`)
+3. Verificar que aparezcan las views `vw_*`.
+
+### 10.6 Checklist de activación
+- [ ] Workflows activos en n8n.
+- [ ] `raw_events` recibe registros con `source='kommo'`.
+- [ ] `leads`, `lead_stage_events` y `tasks` con datos.
+- [ ] Reconciliación nocturna programada.
+- [ ] Metabase conectado y leyendo views.
+
+## 11) Go-live script de verificación (copy/paste)
+
+> Ejecutá estos pasos en orden. Ajustá URLs/credenciales según tu entorno.
+
+### 11.1 Variables rápidas (bash)
+```bash
+export N8N_BASE_URL="http://localhost:5678"
+export KOMMO_WEBHOOK_URL="$N8N_BASE_URL/webhook/webhooks/kommo"
+```
+
+### 11.2 Verificar endpoint de webhook con payload simulado
+```bash
+curl -s -X POST "$KOMMO_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -H "X-KOMMO-SIGNATURE: sha256=<firma_placeholder>" \
+  -d '{
+    "event_type": "lead.stage_changed",
+    "event_time": "2026-01-30T15:04:00Z",
+    "lead": {
+      "id": 10101,
+      "created_at": "2026-01-25T10:00:00Z",
+      "updated_at": "2026-01-30T15:04:00Z",
+      "pipeline_id": 3001,
+      "from_stage_id": 11,
+      "to_stage_id": 12,
+      "owner_id": 900,
+      "status": "active",
+      "price": 20000,
+      "lost_reason_id": null,
+      "tags": ["inbound", "whatsapp"],
+      "utm_source": "google",
+      "utm_campaign": "search_brand",
+      "channel": "whatsapp"
+    },
+    "actor": { "type": "user", "id": 900 }
+  }'
+```
+
+### 11.3 Verificar persistencia (SQL)
+```sql
+-- Debe existir al menos 1 raw_event
+SELECT COUNT(*) FROM raw_events WHERE source = 'kommo';
+
+-- Verificar lead actualizado
+SELECT * FROM leads WHERE lead_id = 10101;
+
+-- Verificar evento de etapa
+SELECT * FROM lead_stage_events WHERE lead_id = 10101 ORDER BY event_at DESC LIMIT 5;
+```
+
+### 11.4 Verificar views en Metabase / SQL
+```sql
+SELECT * FROM vw_lead_funnel_times WHERE lead_id = 10101;
+SELECT * FROM vw_tasks_health LIMIT 5;
+```
+
+### 11.5 Verificar reconciliación
+```sql
+SELECT * FROM raw_events
+WHERE source = 'reconcile'
+ORDER BY received_at DESC
+LIMIT 5;
+```
+
 ## Troubleshooting
 
 - **Eventos duplicados:** revisar `raw_events` (`source,event_id` único).
