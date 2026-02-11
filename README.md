@@ -322,3 +322,29 @@ Configurar estas variables en el servicio:
 - `KOMMO_WEBHOOK_SECRET=<secret-opcional>`
 
 > Nota: en Railway no se usa `docker-compose.yml`; se despliega un servicio por app.
+
+#### Caso específico: Railpack analiza solo `./.gitkeep`
+
+Si en logs ves algo como:
+
+```txt
+The app contents that Railpack analyzed contains:
+./
+└── .gitkeep
+```
+
+entonces **Railway no está leyendo el código real del repo** (está apuntando a una ruta/fuente vacía).
+
+Checklist de corrección en Railway:
+
+1. En el servicio, abrir **Settings → Source**.
+2. Verificar que el repo conectado sea el correcto.
+3. Verificar que la **Branch** sea la que contiene estos archivos (`README.md`, `Dockerfile`, `railway.toml`, `n8n/`, `sql/`).
+4. Si existe **Root Directory / Source Directory**, setearlo en `.` (raíz del repo).
+5. Confirmar que no haya filtros que excluyan archivos (incluido `Dockerfile`).
+6. Hacer **Redeploy** desde el último commit.
+
+Verificación esperada en logs de build:
+
+- Debe detectar `Dockerfile`.
+- No debería volver a aparecer el árbol mínimo con solo `.gitkeep`.
