@@ -291,3 +291,34 @@ LIMIT 5;
 - **Webhook responde 401:** revisar `KOMMO_WEBHOOK_SECRET` + header firma.
 - **No inserta en Supabase:** validar credencial Postgres en n8n y permisos SQL.
 - **Diferencias de API Kommo:** ajustar nodos HTTP (placeholders).
+
+### Deploy en Railway: `Railpack could not determine how to build the app`
+
+Ese error aparece porque Railway intentó usar **Railpack/Nixpacks** para detectar automáticamente cómo buildar el proyecto, y este repo está orientado a n8n (no a un runtime Node clásico con `package.json`).
+
+#### Solución aplicada en este repo
+
+Se agregó `railway.toml` para forzar build por Dockerfile:
+
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+```
+
+#### Variables recomendadas en Railway
+
+Configurar estas variables en el servicio:
+
+- `N8N_HOST=0.0.0.0`
+- `N8N_PORT=${PORT}` (usar el puerto dinámico de Railway)
+- `N8N_PROTOCOL=https`
+- `WEBHOOK_URL=https://<tu-dominio-railway>/`
+- `N8N_ENCRYPTION_KEY=<valor-seguro>`
+- `TZ=America/Argentina/Buenos_Aires`
+- `DATABASE_URL=<supabase-postgres-url>`
+- `KOMMO_SUBDOMAIN=<tu-subdominio>`
+- `KOMMO_ACCESS_TOKEN=<token>`
+- `KOMMO_WEBHOOK_SECRET=<secret-opcional>`
+
+> Nota: en Railway no se usa `docker-compose.yml`; se despliega un servicio por app.
