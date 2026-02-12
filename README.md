@@ -335,6 +335,11 @@ The app contents that Railpack analyzed contains:
 
 entonces **Railway no está leyendo el código real del repo** (está apuntando a una ruta/fuente vacía).
 
+Además, en la práctica suele significar una de estas dos cosas:
+
+- el deploy está apuntando a un repo/branch/directorio equivocado, o
+- los cambios están solo en local y **no fueron pusheados** a GitHub.
+
 Checklist de corrección en Railway:
 
 1. En el servicio, abrir **Settings → Source**.
@@ -348,3 +353,13 @@ Verificación esperada en logs de build:
 
 - Debe detectar `Dockerfile`.
 - No debería volver a aparecer el árbol mínimo con solo `.gitkeep`.
+
+#### Preflight recomendado antes de redeploy
+
+Este repo incluye un script de verificación:
+
+```bash
+bash scripts/railway_preflight.sh
+```
+
+El script valida archivos críticos, estado git local y te recuerda el checklist para el caso `.gitkeep`.
