@@ -9,6 +9,13 @@ async function bootstrap() {
 
   startReconcileJob();
 
+  process.on('SIGTERM', async () => {
+    logger.info('SIGTERM recibido, cerrando servidor...');
+    await app.close();
+    await pool.end();
+    process.exit(0);
+  });
+
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     logger.info({ port: env.PORT }, 'Servidor iniciado');
@@ -19,8 +26,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
-process.on('SIGTERM', async () => {
-  await pool.end();
-  process.exit(0);
-});

@@ -48,14 +48,14 @@ CREATE TABLE IF NOT EXISTS leads (
   lead_id bigint PRIMARY KEY,
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
-  pipeline_id bigint NOT NULL REFERENCES pipelines(pipeline_id),
-  stage_id bigint NOT NULL REFERENCES stages(stage_id),
-  status text NOT NULL,
-  owner_id bigint NOT NULL REFERENCES users(user_id),
+  pipeline_id bigint NULL,
+  stage_id bigint NULL,
+  status text NULL,
+  owner_id bigint NULL,
   source text NOT NULL DEFAULT 'unknown',
   campaign text NOT NULL DEFAULT 'unknown',
   channel text NOT NULL DEFAULT 'unknown',
-  lost_reason_id bigint NULL REFERENCES lost_reasons(lost_reason_id),
+  lost_reason_id bigint NULL,
   price numeric NULL,
   tags jsonb NOT NULL DEFAULT '[]'::jsonb
 );
@@ -76,13 +76,13 @@ CREATE TABLE IF NOT EXISTS lead_stage_events (
 -- Tareas asociadas al lead
 CREATE TABLE IF NOT EXISTS tasks (
   task_id bigint PRIMARY KEY,
-  lead_id bigint NOT NULL REFERENCES leads(lead_id),
-  owner_id bigint NOT NULL REFERENCES users(user_id),
-  task_type text NOT NULL,
+  lead_id bigint NOT NULL,
+  owner_id bigint NULL,
+  task_type text NOT NULL DEFAULT 'generic',
   created_at timestamptz NOT NULL,
-  due_at timestamptz NOT NULL,
+  due_at timestamptz NULL,
   completed_at timestamptz NULL,
-  status text NOT NULL
+  status text NOT NULL DEFAULT 'open'
 );
 
 -- Mapeo a etapas semánticas para analítica transversal

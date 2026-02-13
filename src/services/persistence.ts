@@ -24,7 +24,7 @@ export async function insertRawEvent(params: {
     JSON.stringify(params.payload)
   ]);
 
-  return { inserted: result.rowCount > 0 };
+  return { inserted: (result.rowCount ?? 0) > 0 };
 }
 
 export async function processNormalizedEvent(event: NormalizedEvent): Promise<void> {
@@ -190,7 +190,7 @@ async function upsertTask(client: PoolClient, event: NormalizedEvent): Promise<v
     event.taskId,
     event.leadId,
     event.ownerId,
-    event.status,
+    event.taskType,
     event.eventAt,
     event.dueAt,
     event.completedAt,

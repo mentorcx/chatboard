@@ -23,6 +23,7 @@ export type NormalizedEvent = {
   campaign: string | null;
   channel: string | null;
   taskId: number | null;
+  taskType: string | null;
   leadCreatedAt: string | null;
   leadUpdatedAt: string | null;
 };
@@ -95,7 +96,7 @@ export function normalizeKommoEvent(body: Record<string, unknown>, parsed?: Komm
     pipelineId,
     fromStageId,
     toStageId,
-    ownerId: Number(lead.owner_id ?? task.owner_id) || null,
+    ownerId: Number(lead.responsible_user_id ?? lead.owner_id ?? task.responsible_user_id ?? task.owner_id) || null,
     actorType: (actor.type as string | undefined) ?? null,
     actorId: Number(actor.id) || null,
     status: (lead.status as string | undefined) ?? (task.status as string | undefined) ?? null,
@@ -108,6 +109,7 @@ export function normalizeKommoEvent(body: Record<string, unknown>, parsed?: Komm
     campaign: (lead.campaign as string | undefined) ?? (lead.utm_campaign as string | undefined) ?? null,
     channel: (lead.channel as string | undefined) ?? null,
     taskId,
+    taskType: (task.task_type as string | undefined) ?? null,
     leadCreatedAt: toISOStringOrNull(lead.created_at),
     leadUpdatedAt: toISOStringOrNull(lead.updated_at)
   };

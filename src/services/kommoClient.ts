@@ -2,10 +2,15 @@ import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { sleep } from '../utils/time';
 
+function unixSecondsToISO(ts: number | undefined): string | null {
+  if (ts == null) return null;
+  return new Date(ts * 1000).toISOString();
+}
+
 type KommoLeadResponse = {
   id: number;
-  created_at?: string;
-  updated_at?: string;
+  created_at?: number;
+  updated_at?: number;
   pipeline_id?: number;
   status_id?: number;
   old_status_id?: number;
@@ -22,9 +27,9 @@ type KommoTaskResponse = {
   entity_id: number;
   responsible_user_id?: number;
   task_type_id?: number;
-  created_at?: string;
-  complete_till?: string;
-  closed_at?: string;
+  created_at?: number;
+  complete_till?: number;
+  closed_at?: number;
   is_completed?: boolean;
 };
 
@@ -63,11 +68,11 @@ async function requestWithRetry(path: string, retries = 3): Promise<any> {
  * Endpoint placeholder: ajustar según endpoint final de Kommo para leads actualizados.
  */
 export async function fetchLeadsUpdatedSince(hours = 48): Promise<KommoLeadResponse[]> {
-  const updatedSince = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const updatedSince = Math.floor((Date.now() - hours * 60 * 60 * 1000) / 1000);
   const all: KommoLeadResponse[] = [];
 
   for (let page = 1; page < 1000; page += 1) {
-    const path = `/api/v4/leads?filter[updated_at][from]=${encodeURIComponent(updatedSince)}&limit=${DEFAULT_PAGE_SIZE}&page=${page}`;
+    const path = `/api/v4/leads?filter[updated_at][from]=${updatedSince}&limit=${DEFAULT_PAGE_SIZE}&page=${page}`;
     const data = await requestWithRetry(path);
 
     const batch = (data?._embedded?.leads ?? []) as KommoLeadResponse[];
@@ -84,11 +89,11 @@ export async function fetchLeadsUpdatedSince(hours = 48): Promise<KommoLeadRespo
  * Endpoint placeholder: ajustar según endpoint final de Kommo para tasks actualizadas.
  */
 export async function fetchTasksUpdatedSince(hours = 48): Promise<KommoTaskResponse[]> {
-  const updatedSince = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const updatedSince = Math.floor((Date.now() - hours * 60 * 60 * 1000) / 1000);
   const all: KommoTaskResponse[] = [];
 
   for (let page = 1; page < 1000; page += 1) {
-    const path = `/api/v4/tasks?filter[updated_at][from]=${encodeURIComponent(updatedSince)}&limit=${DEFAULT_PAGE_SIZE}&page=${page}`;
+    const path = `/api/v4/tasks?filter[updated_at][from]=${updatedSince}&limit=${DEFAULT_PAGE_SIZE}&page=${page}`;
     const data = await requestWithRetry(path);
 
     const batch = (data?._embedded?.tasks ?? []) as KommoTaskResponse[];
@@ -108,7 +113,7 @@ export function mapLeadFromKommo(raw: KommoLeadResponse) {
   return {
     eventType: 'reconcile.lead',
     eventId: `lead-${raw.id}-${raw.updated_at ?? Date.now()}`,
-    eventAt: new Date(raw.updated_at ?? Date.now()).toISOString(),
+    eventAt: unixSecondsToISO(raw.updated_at) ?? new Date().toISOString(),
     leadId: raw.id,
     pipelineId: raw.pipeline_id ?? null,
     fromStageId: raw.old_status_id ?? null,
@@ -126,18 +131,19 @@ export function mapLeadFromKommo(raw: KommoLeadResponse) {
     campaign: getField('UTM_CAMPAIGN'),
     channel: getField('CHANNEL'),
     taskId: null,
-    leadCreatedAt: raw.created_at ? new Date(raw.created_at).toISOString() : null,
-    leadUpdatedAt: raw.updated_at ? new Date(raw.updated_at).toISOString() : null
+    taskType: null,
+    leadCreatedAt: unixSecondsToISO(raw.created_at),
+    leadUpdatedAt: unixSecondsToISO(raw.updated_at)
   };
 }
 
 export function mapTaskFromKommo(raw: KommoTaskResponse) {
-  const completedAt = raw.closed_at ? new Date(raw.closed_at).toISOString() : null;
+  const completedAt = unixSecondsToISO(raw.closed_at);
 
   return {
     eventType: raw.is_completed ? 'task.completed' : 'task.updated',
     eventId: `task-${raw.id}-${raw.closed_at ?? raw.complete_till ?? Date.now()}`,
-    eventAt: new Date(raw.created_at ?? Date.now()).toISOString(),
+    eventAt: unixSecondsToISO(raw.created_at) ?? new Date().toISOString(),
     leadId: raw.entity_id,
     pipelineId: null,
     fromStageId: null,
@@ -146,7 +152,7 @@ export function mapTaskFromKommo(raw: KommoTaskResponse) {
     actorType: 'system',
     actorId: null,
     status: raw.is_completed ? 'completed' : 'open',
-    dueAt: raw.complete_till ? new Date(raw.complete_till).toISOString() : null,
+    dueAt: unixSecondsToISO(raw.complete_till),
     completedAt,
     price: null,
     lostReasonId: null,
@@ -155,6 +161,7 @@ export function mapTaskFromKommo(raw: KommoTaskResponse) {
     campaign: null,
     channel: null,
     taskId: raw.id,
+    taskType: raw.task_type_id != null ? String(raw.task_type_id) : null,
     leadCreatedAt: null,
     leadUpdatedAt: null
   };

@@ -10,7 +10,7 @@ export async function registerWebhookRoutes(app: FastifyInstance): Promise<void>
   app.post<{ Body: KommoRequestBody }>('/webhooks/kommo', async (request, reply) => {
     const signature = request.headers['x-kommo-signature'] as string | undefined;
     const altSignature = request.headers['x-signature'] as string | undefined;
-    const rawBody = JSON.stringify(request.body ?? {});
+    const rawBody = request.rawBody ?? JSON.stringify(request.body ?? {});
 
     if (!validateKommoSignature(rawBody, signature ?? altSignature)) {
       request.log.warn('Firma inválida en webhook Kommo');

@@ -79,13 +79,13 @@ SELECT
   w.week_start,
   w.owner_id,
   COUNT(*) AS leads_in,
-  SUM(f.qualified) AS qualified,
-  SUM(f.appointments) AS appointments,
-  SUM(f.won) AS won,
-  SUM(f.lost) AS lost,
-  CASE WHEN COUNT(*) > 0 THEN SUM(f.won)::numeric / COUNT(*)::numeric ELSE 0 END AS win_rate,
+  COALESCE(SUM(f.qualified), 0) AS qualified,
+  COALESCE(SUM(f.appointments), 0) AS appointments,
+  COALESCE(SUM(f.won), 0) AS won,
+  COALESCE(SUM(f.lost), 0) AS lost,
+  CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(f.won), 0)::numeric / COUNT(*)::numeric ELSE 0 END AS win_rate,
   AVG(f.time_to_qualify_hours) AS avg_time_to_qualify_hours,
   AVG(f.time_to_appointment_hours) AS avg_time_to_appointment_hours
 FROM weeks w
-JOIN funnel f ON f.lead_id = w.lead_id
+LEFT JOIN funnel f ON f.lead_id = w.lead_id
 GROUP BY w.week_start, w.owner_id;
